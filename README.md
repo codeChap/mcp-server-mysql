@@ -121,7 +121,56 @@ The server provides the following tools:
 - **update**: Update data in a specified table based on conditions
 - **delete**: Delete data from a specified table based on conditions
 
-### Query Tool Examples
+### Query Tool
+
+The `query` tool executes SQL queries on the database.
+
+#### Parameters
+
+- `query` (required): The SQL query to execute
+- `database` (optional): Database name to use for this query. If specified, the query will be executed in the context of this database.
+
+#### Database Context
+
+Each query can specify which database to use via the optional `database` parameter. This is useful when working with multiple databases or when you need to query a database different from the default.
+
+**Example with database parameter:**
+```json
+{
+  "name": "query",
+  "arguments": {
+    "query": "SELECT * FROM crm_sites LIMIT 10",
+    "database": "dev_smartConnect_za"
+  }
+}
+```
+
+**Example without database parameter (uses default):**
+```json
+{
+  "name": "query",
+  "arguments": {
+    "query": "SELECT * FROM users WHERE active = 1 LIMIT 10"
+  }
+}
+```
+
+**Multiple databases in one session:**
+```json
+// Query from production database
+{
+  "query": "SELECT COUNT(*) FROM customers",
+  "database": "production_db"
+}
+
+// Query from test database
+{
+  "query": "SELECT COUNT(*) FROM test_data",
+  "database": "test_db"
+}
+```
+
+#### Query Safety
 
 By default, only SELECT queries are allowed:
 
@@ -138,6 +187,13 @@ ALTER TABLE users ADD COLUMN last_login TIMESTAMP;
 DROP TABLE old_data;
 TRUNCATE TABLE logs;
 ```
+
+#### Notes
+
+- When no `database` parameter is provided, the query uses the default database specified in `--database`
+- The `database` parameter allows you to query any database you have permissions for
+- Each query with a `database` parameter acquires its own connection to ensure proper database context
+- Database names with special characters are automatically escaped
 
 ## License
 

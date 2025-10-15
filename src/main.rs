@@ -137,6 +137,7 @@ struct SchemaArguments {
 #[derive(Debug, Deserialize)]
 struct QueryArguments {
     query: String,
+    database: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,6 +424,10 @@ async fn handle_request(
                                 } else {
                                     "SELECT query to execute"
                                 }
+                            },
+                            "database": {
+                                "type": "string",
+                                "description": "Optional database name to use for this query. If specified, the query will be executed in the context of this database."
                             }
                         },
                         "required": ["query"]
@@ -523,7 +528,7 @@ async fn handle_request(
                             "query" => {
                                 match serde_json::from_value::<QueryArguments>(tool_params.arguments) {
                                     Ok(query_args) => {
-                                        execute_query(request.id.clone().unwrap_or(json!(null)), query_args.query, current_pool, allow_dangerous_queries).await
+                                        execute_query(request.id.clone().unwrap_or(json!(null)), query_args.query, query_args.database, current_pool, allow_dangerous_queries).await
                                     }
                                     Err(e) => JsonRpcResponse {
                                         jsonrpc: "2.0".to_string(),
@@ -944,6 +949,7 @@ async fn delete_data(
 async fn execute_query(
     id: serde_json::Value,
     query: String,
+    database: Option<String>,
     pool: &Pool<MySql>,
     allow_dangerous_queries: bool,
 ) -> JsonRpcResponse {
@@ -967,7 +973,34 @@ async fn execute_query(
 
     debug!("Executing query: {}", query);
     
-    match sqlx::query(&query).fetch_all(pool).await {
+    // If a database is specified, acquire a connection and set the database context
+    let result = if let Some(db) = database {
+        debug!("Setting database context to: {}", db);
+        
+        // Acquire a connection from the pool
+        let mut conn = match pool.acquire().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                error!("Failed to acquire connection: {}", e);
+                return create_error_response(Some(id), -32005, &format!("Failed to acquire database connection: {}", e));
+            }
+        };
+        
+        // Execute USE database command
+        let use_query = format!("USE `{}`", db.replace("`", "``")); // Escape backticks
+        if let Err(e) = sqlx::query(&use_query).execute(&mut *conn).await {
+            error!("Failed to set database context to '{}': {}", db, e);
+            return create_error_response(Some(id), -32006, &format!("Failed to set database context to '{}': {}", db, e));
+        }
+        
+        // Execute the actual query on the same connection
+        sqlx::query(&query).fetch_all(&mut *conn).await
+    } else {
+        // No database specified, use the pool directly (default database from connection string)
+        sqlx::query(&query).fetch_all(pool).await
+    };
+    
+    match result {
         Ok(rows) => {
             let mut results = Vec::new();
             
