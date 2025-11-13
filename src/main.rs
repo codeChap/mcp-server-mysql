@@ -1,10 +1,22 @@
+//! MySQL MCP Server
+//!
+//! A Model Context Protocol (MCP) server implementation for MySQL databases.
+//! This server enables AI assistants to interact with MySQL databases through
+//! a standardized protocol using JSON-RPC 2.0 over stdio.
+//!
+//! # Features
+//!
+//! - Schema inspection and introspection
+//! - SQL query execution (with safety controls)
+//! - Data manipulation (INSERT, UPDATE, DELETE)
+//! - Robust error handling and logging
+//! - Configurable security settings
+
 use clap::Parser;
-use log::{debug, info, warn, error};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{Column, MySql, Pool, Row};
-
-
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 // Command line arguments

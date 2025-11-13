@@ -1,200 +1,324 @@
-# Zed MySQL Context Server
+# MySQL MCP Server
 
-A Model Context Server for MySQL that integrates with Zed AI assistant.
+A high-quality Model Context Protocol (MCP) server implementation for MySQL databases. This server enables AI assistants like Claude to interact with MySQL databases through a standardized protocol.
 
-## Prerequisites
+## Features
 
-- Rust (latest stable version)
-- MySQL/MariaDB database
-- Zed
+- **Schema Inspection**: Retrieve table schemas and structure information
+- **Query Execution**: Execute SQL queries (read-only by default for safety)
+- **Data Manipulation**: Insert, update, and delete operations
+- **Safety Controls**: Configurable query restrictions to prevent dangerous operations
+- **Connection Management**: Robust connection handling with retry logic
+- **Error Handling**: Comprehensive error reporting with detailed messages
 
 ## Installation
 
-1. Clone and build:
+### Prerequisites
+
+- Rust 1.70+ 
+- MySQL 5.7+ or MariaDB 10.2+
+- Access to a MySQL database
+
+### Building from Source
+
 ```bash
 git clone <repository-url>
 cd mcp-server-mysql
 cargo build --release
 ```
 
-2. Configure Zed (see Configuration section)
+The compiled binary will be available at `target/release/mcp-server-mysql`.
 
-## Configuration
+## Usage
 
-Click on the "Toggle Agent Menu" -> "Add custom Server"
+### Command Line Arguments
 
-```json
-{
-  /// The name of your MCP server
-  "mysql-mcp-server": {
-    /// The command which runs the MCP server
-    "command": "/path/to/mcp-server-mysql/target/release/mcp-server-mysql",
-    /// The arguments to pass to the MCP server
-    "args": [
-        "--username", "your_username",
-        "--password", "your_password",
-        "--database", "your_database",
-        "--host", "localhost",
-        "--port", "3306"
-    ],
-    /// The environment variables to set
-    "env": {}
-  }
-}
+```bash
+mcp-server-mysql \
+  --host localhost \
+  --port 3306 \
+  --username your_username \
+  --password your_password \
+  --database your_database \
+  --allow-dangerous-queries false
 ```
 
-To allow dangerous queries (INSERT, UPDATE, DELETE, etc.), add the flag:
+### Arguments
+
+| Argument | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `--host` | MySQL server hostname | `localhost` | No |
+| `--port` | MySQL server port | `3306` | No |
+| `--username` | MySQL username | - | Yes |
+| `--password` | MySQL password | ` ` (empty) | No |
+| `--database` | Database name to connect to | - | Yes |
+| `--allow-dangerous-queries` | Allow INSERT/UPDATE/DELETE queries | `false` | No |
+
+### Configuration with Claude Desktop
+
+Add this configuration to your Claude Desktop config file:
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
-  "mysql-mcp-server": {
-    "command": "/path/to/mcp-server-mysql/target/release/mcp-server-mysql",
-    "args": [
-        "--username", "your_username",
-        "--password", "your_password",
-        "--database", "your_database",
+  "mcpServers": {
+    "mysql": {
+      "command": "/path/to/mcp-server-mysql",
+      "args": [
         "--host", "localhost",
         "--port", "3306",
-        "--allow-dangerous-queries"
-    ],
-    "env": {}
+        "--username", "your_username",
+        "--password", "your_password",
+        "--database", "your_database"
+      ]
+    }
   }
 }
 ```
 
-### Options
-
-- `--host <HOST>`: MySQL host (default: localhost)
-- `--port <PORT>`: MySQL port (default: 3306)
-- `--username <USERNAME>`: MySQL username (required)
-- `--password <PASSWORD>`: MySQL password (default: empty)
-- `--database <DATABASE>`: MySQL database name (required)
-- `--allow-dangerous-queries`: Allow dangerous SQL keywords in queries (INSERT, UPDATE, DELETE, etc.)
-
-### Logging
-
-The server uses standard Rust logging. Control log levels with the `RUST_LOG` environment variable:
-
-- `RUST_LOG=error` - Only show errors
-- `RUST_LOG=warn` - Show warnings and errors  
-- `RUST_LOG=info` - Show info, warnings and errors (recommended for production)
-- `RUST_LOG=debug` - Show all messages including detailed debug info
-
-### Testing
-
-Test manually with your database:
-
-```bash
-# Test initialization (with info logging)
-RUST_LOG=info echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | cargo run --bin mcp-server-mysql -- --username admin --database mydb
-
-# Test schema retrieval (quiet mode)
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mysql","arguments":{"table_name":"users"}}}' | cargo run --bin mcp-server-mysql -- --username admin --database mydb
-
-# Test with debug output (for troubleshooting)
-RUST_LOG=debug echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | cargo run --bin mcp-server-mysql -- --username admin --database mydb
-```
-
-Or use the test script:
-
-```bash
-./test-stdio.sh
-```
-
-### Building
-
-```bash
-# Development
-cargo build
-
-# Production
-cargo build --release
-```
+**Security Note**: For production use, consider using environment variables or a secure secrets management solution instead of hardcoding passwords in the configuration file.
 
 ## Available Tools
 
-The server provides the following tools:
+### 1. mysql (Schema Inspection)
 
-- **mysql**: Retrieve MySQL database schema information for tables
-- **query**: Execute SQL queries (SELECT only by default, all queries with `--allow-dangerous-queries`)
-- **insert**: Insert data into a specified table
-- **update**: Update data in a specified table based on conditions
-- **delete**: Delete data from a specified table based on conditions
+Retrieve database schema information for tables.
 
-### Query Tool
+**Parameters:**
+- `table_name` (string): Name of the table to inspect, or `"all-tables"` to get all table schemas
 
-The `query` tool executes SQL queries on the database.
-
-#### Parameters
-
-- `query` (required): The SQL query to execute
-- `database` (optional): Database name to use for this query. If specified, the query will be executed in the context of this database.
-
-#### Database Context
-
-Each query can specify which database to use via the optional `database` parameter. This is useful when working with multiple databases or when you need to query a database different from the default.
-
-**Example with database parameter:**
+**Example:**
 ```json
 {
-  "name": "query",
-  "arguments": {
-    "query": "SELECT * FROM crm_sites LIMIT 10",
-    "database": "dev_smartConnect_za"
+  "table_name": "users"
+}
+```
+
+**Returns:**
+- Column information (name, type, nullable, defaults, keys)
+- Index information
+- Table constraints
+
+### 2. query (SQL Execution)
+
+Execute SQL queries on the database.
+
+**Parameters:**
+- `query` (string): SQL query to execute
+- `database` (string, optional): Database name to use for this specific query
+
+**Example:**
+```json
+{
+  "query": "SELECT * FROM users WHERE active = 1 LIMIT 10"
+}
+```
+
+**Safety:**
+- By default, only SELECT queries are allowed
+- Use `--allow-dangerous-queries` flag to enable INSERT/UPDATE/DELETE
+- Dangerous keywords are blocked unless explicitly enabled
+
+### 3. insert (Insert Data)
+
+Insert data into a specified table.
+
+**Parameters:**
+- `table_name` (string): Name of the table
+- `data` (object): Key-value pairs of column names and values
+
+**Example:**
+```json
+{
+  "table_name": "users",
+  "data": {
+    "username": "john_doe",
+    "email": "john@example.com",
+    "active": true
   }
 }
 ```
 
-**Example without database parameter (uses default):**
+**Returns:** Last insert ID
+
+### 4. update (Update Data)
+
+Update data in a specified table based on conditions.
+
+**Parameters:**
+- `table_name` (string): Name of the table
+- `data` (object): Key-value pairs of columns to update
+- `conditions` (object): Key-value pairs for WHERE clause
+
+**Example:**
 ```json
 {
-  "name": "query",
-  "arguments": {
-    "query": "SELECT * FROM users WHERE active = 1 LIMIT 10"
+  "table_name": "users",
+  "data": {
+    "email": "newemail@example.com",
+    "updated_at": "2024-01-15 10:30:00"
+  },
+  "conditions": {
+    "id": 123
   }
 }
 ```
 
-**Multiple databases in one session:**
+**Returns:** Number of affected rows
+
+### 5. delete (Delete Data)
+
+Delete data from a specified table based on conditions.
+
+**Parameters:**
+- `table_name` (string): Name of the table
+- `conditions` (object): Key-value pairs for WHERE clause
+
+**Example:**
 ```json
-// Query from production database
 {
-  "query": "SELECT COUNT(*) FROM customers",
-  "database": "production_db"
-}
-
-// Query from test database
-{
-  "query": "SELECT COUNT(*) FROM test_data",
-  "database": "test_db"
+  "table_name": "users",
+  "conditions": {
+    "id": 123
+  }
 }
 ```
 
-#### Query Safety
+**Returns:** Number of affected rows
 
-By default, only SELECT queries are allowed:
+**Warning:** Always specify conditions to avoid deleting all rows!
 
-```sql
-SELECT COUNT(*) as count FROM accounts WHERE primary_category = 'Medical';
-SELECT * FROM users WHERE active = 1 LIMIT 10;
+## Security Considerations
+
+### Read-Only Mode (Default)
+
+By default, the server operates in read-only mode, allowing only SELECT queries. This prevents accidental data modification or deletion.
+
+### Dangerous Queries Mode
+
+Enable write operations with `--allow-dangerous-queries`:
+
+```bash
+mcp-server-mysql --username user --password pass --database mydb --allow-dangerous-queries true
 ```
 
-With `--allow-dangerous-queries` flag, you can execute any SQL:
+**Use with caution!** This enables:
+- INSERT statements
+- UPDATE statements
+- DELETE statements
+- Other potentially destructive operations
 
-```sql
-CREATE TABLE new_table (id INT PRIMARY KEY, name VARCHAR(255));
-ALTER TABLE users ADD COLUMN last_login TIMESTAMP;
-DROP TABLE old_data;
-TRUNCATE TABLE logs;
+### SQL Injection Protection
+
+- Table names are validated to contain only alphanumeric characters and underscores
+- All data values are parameterized using prepared statements
+- No raw SQL concatenation is performed
+
+### Connection Security
+
+- Supports standard MySQL SSL/TLS connections
+- Connection strings can be configured securely
+- Passwords can be provided via environment variables
+
+## Troubleshooting
+
+### Connection Failures
+
+If you encounter connection errors:
+
+1. **Check MySQL is running:**
+   ```bash
+   mysql -h localhost -u your_username -p
+   ```
+
+2. **Verify credentials:**
+   - Ensure the username and password are correct
+   - Confirm the user has access to the specified database
+
+3. **Check network access:**
+   - Verify the host and port are correct
+   - Ensure no firewall is blocking the connection
+
+4. **Review server logs:**
+   - The server logs to stderr
+   - Check for detailed error messages
+
+### Common Errors
+
+#### "Database connection failed"
+
+- MySQL server may not be running
+- Incorrect host/port configuration
+- Network connectivity issues
+
+#### "Only SELECT queries are allowed"
+
+- You're trying to run a write query in read-only mode
+- Add `--allow-dangerous-queries true` if write access is needed
+
+#### "No database selected"
+
+- The specified database doesn't exist
+- The user doesn't have access to the database
+- Check `SHOW DATABASES;` to see available databases
+
+## Development
+
+### Project Structure
+
+```
+mcp-server-mysql/
+├── src/
+│   └── main.rs          # Main server implementation
+├── Cargo.toml           # Rust dependencies
+├── Cargo.lock          # Locked dependency versions
+└── README.md           # This file
 ```
 
-#### Notes
+### Building for Development
 
-- When no `database` parameter is provided, the query uses the default database specified in `--database`
-- The `database` parameter allows you to query any database you have permissions for
-- Each query with a `database` parameter acquires its own connection to ensure proper database context
-- Database names with special characters are automatically escaped
+```bash
+cargo build
+cargo run -- --help
+```
+
+### Running Tests
+
+```bash
+cargo test
+```
+
+### Code Quality
+
+```bash
+# Format code
+cargo fmt
+
+# Run linter
+cargo clippy
+```
+
+## Protocol Information
+
+This server implements the Model Context Protocol (MCP) specification:
+- **Protocol Version:** 2025-03-26
+- **Transport:** stdio (standard input/output)
+- **Message Format:** JSON-RPC 2.0
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+- Code follows Rust best practices
+- All tests pass
+- Documentation is updated
+- Commit messages are clear and descriptive
 
 ## License
 
 Apache-2.0
+
+## Support
+
+For issues, questions, or contributions, please open an issue on the project repository.

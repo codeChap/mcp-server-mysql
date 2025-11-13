@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "mysql": {
+      "command": "/path/to/mcp-server-mysql",
+      "args": [
+        "--host", "localhost",
+        "--port", "3306",
+        "--username", "your_username",
+        "--password", "your_password",
+        "--database", "your_database"
+      ]
+    },
+    "mysql-read-write": {
+      "command": "/path/to/mcp-server-mysql",
+      "args": [
+        "--host", "localhost",
+        "--port", "3306",
+        "--username", "admin_user",
+        "--password", "admin_password",
+        "--database", "production_db",
+        "--allow-dangerous-queries", "true"
+      ]
+    }
+  }
+}
