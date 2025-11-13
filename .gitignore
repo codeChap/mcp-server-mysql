@@ -42,3 +42,7 @@ logs/
 *.pid
 *.seed
 *.pid.lock
+-e 
+# Deployment artifacts
+deploy/
+*.tar.gz
