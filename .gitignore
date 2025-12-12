@@ -42,7 +42,11 @@ logs/
 *.pid
 *.seed
 *.pid.lock
--e 
+
+# Test output files
+output.json
+test_*.json
+
 # Deployment artifacts
 deploy/
 *.tar.gz
