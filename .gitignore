@@ -21,6 +21,8 @@ personal-*.json
 # IDE/Editor files
 .vscode/
 .idea/
+.zed/
+zed-settings.json
 *.swp
 *.swo
 *~

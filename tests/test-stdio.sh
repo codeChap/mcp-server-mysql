@@ -1,6 +1,9 @@
 #!/bin/bash
 
 # Test script for the stdio-based MCP server
+# Run from the project root or from tests/
+
+cd "$(dirname "$0")/.." || exit 1
 
 # Database connection settings - modify these for your database
 DB_HOST="localhost"

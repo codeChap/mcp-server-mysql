@@ -14,17 +14,15 @@
 
 mod config;
 mod db;
+mod error;
 mod rpc;
 mod server;
-
-use clap::Parser;
-use config::Args;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     env_logger::init();
-    
-    let args = Args::parse();
-    server::run(args).await
+
+    let config = config::load()?;
+    server::run(config).await
 }

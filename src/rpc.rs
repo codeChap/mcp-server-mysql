@@ -120,3 +120,27 @@ pub struct DeleteArguments {
     pub table_name: String,
     pub conditions: serde_json::Value,
 }
+
+impl JsonRpcResponse {
+    pub fn success(id: Option<Value>, result: Value) -> Self {
+        JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(result),
+            error: None,
+        }
+    }
+
+    pub fn error(id: Option<Value>, code: i32, message: String) -> Self {
+        JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code,
+                message,
+                data: None,
+            }),
+        }
+    }
+}
