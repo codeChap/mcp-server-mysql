@@ -80,7 +80,7 @@ pub async fn run(args: Config) -> Result<(), Box<dyn std::error::Error>> {
     let mut lines = reader.lines();
 
     info!("MCP MySQL Server started and ready to accept connections");
-    info!("Server config: host={}, port={}, username={}, database={}",
+    info!("Server config: host={}, port={}, username={}, database={:?}",
               args.host, args.port, args.username, args.database);
     info!("Server PID: {}", std::process::id());
     debug!("Environment variables:");
@@ -188,12 +188,29 @@ async fn handle_request(
                     url
                 }
                 None => {
-                    let url = format!(
-                        "mysql://{}:{}@{}:{}/{}",
-                        args.username, args.password, args.host, args.port, args.database
-                    );
-                    info!("Using database_url from config: mysql://{}:***@{}:{}/{}",
-                             args.username, args.host, args.port, args.database);
+                    // If no default database is configured, connect to the server
+                    // without selecting one. Queries can then use the `database`
+                    // parameter to choose context per call. This is especially
+                    // useful in dev environments with many databases.
+                    let database = args.database.as_deref().filter(|s| !s.is_empty()).unwrap_or("");
+                    let url = if database.is_empty() {
+                        format!(
+                            "mysql://{}:{}@{}:{}",
+                            args.username, args.password, args.host, args.port
+                        )
+                    } else {
+                        format!(
+                            "mysql://{}:{}@{}:{}/{}",
+                            args.username, args.password, args.host, args.port, database
+                        )
+                    };
+                    let db_suffix = if database.is_empty() {
+                        String::new()
+                    } else {
+                        format!("/{}", database)
+                    };
+                    info!("Using database_url from config: mysql://{}:***@{}:{}{}",
+                             args.username, args.host, args.port, db_suffix);
                     url
                 }
             };
@@ -212,7 +229,7 @@ async fn handle_request(
                         },
                         server_info: ServerInfo {
                             name: "mcp-server-mysql".to_string(),
-                            version: "0.1.0".to_string(),
+                            version: env!("CARGO_PKG_VERSION").to_string(),
                         },
                     }))
                 }
@@ -231,13 +248,17 @@ async fn handle_request(
             let mut tools = vec![
                 Tool {
                     name: "mysql".to_string(),
-                    description: "Retrieve MySQL database schema information for tables".to_string(),
+                    description: "Retrieve MySQL database schema information for tables. Supports an optional 'database' parameter to inspect tables in a specific database (useful when no default database is configured or when switching between multiple databases).".to_string(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
                             "table_name": {
                                 "type": "string",
                                 "description": "Name of the table to inspect, or 'all-tables' to get all table schemas"
+                            },
+                            "database": {
+                                "type": "string",
+                                "description": "Optional database name. If provided, schema information is retrieved from this database instead of the server's default."
                             }
                         },
                         "required": ["table_name"]
@@ -274,7 +295,7 @@ async fn handle_request(
             if allow_dangerous_queries {
                 tools.push(Tool {
                     name: "insert".to_string(),
-                    description: "Insert data into a specified table".to_string(),
+                    description: "Insert data into a specified table. Supports optional 'database' parameter to target a specific database.".to_string(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -285,6 +306,10 @@ async fn handle_request(
                             "data": {
                                 "type": "object",
                                 "description": "Data to insert as key-value pairs"
+                            },
+                            "database": {
+                                "type": "string",
+                                "description": "Optional target database (for environments with multiple databases)"
                             }
                         },
                         "required": ["table_name", "data"]
@@ -292,7 +317,7 @@ async fn handle_request(
                 });
                 tools.push(Tool {
                     name: "update".to_string(),
-                    description: "Update data in a specified table based on conditions".to_string(),
+                    description: "Update data in a specified table based on conditions. Supports optional 'database' parameter.".to_string(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -307,6 +332,10 @@ async fn handle_request(
                             "conditions": {
                                 "type": "object",
                                 "description": "Conditions for update as key-value pairs"
+                            },
+                            "database": {
+                                "type": "string",
+                                "description": "Optional target database"
                             }
                         },
                         "required": ["table_name", "data", "conditions"]
@@ -314,7 +343,7 @@ async fn handle_request(
                 });
                 tools.push(Tool {
                     name: "delete".to_string(),
-                    description: "Delete data from a specified table based on conditions".to_string(),
+                    description: "Delete data from a specified table based on conditions. Supports optional 'database' parameter.".to_string(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -325,6 +354,10 @@ async fn handle_request(
                             "conditions": {
                                 "type": "object",
                                 "description": "Conditions for deletion as key-value pairs"
+                            },
+                            "database": {
+                                "type": "string",
+                                "description": "Optional target database"
                             }
                         },
                         "required": ["table_name", "conditions"]
@@ -350,7 +383,7 @@ async fn handle_request(
                         match tool_params.name.as_str() {
                             "mysql" => {
                                 dispatch_tool!(id, tool_params.arguments, SchemaArguments,
-                                    |args: SchemaArguments| get_schema(args.table_name, current_pool),
+                                    |args: SchemaArguments| get_schema(args.table_name, args.database, current_pool),
                                     |result: crate::db::SchemaResult| {
                                         if result.schemas.len() == 1 {
                                             json!({
@@ -398,7 +431,7 @@ async fn handle_request(
                             }
                             "insert" => {
                                 dispatch_tool!(id, tool_params.arguments, InsertArguments,
-                                    |args: InsertArguments| insert_data(args.table_name, args.data, current_pool),
+                                    |args: InsertArguments| insert_data(args.table_name, args.data, args.database, current_pool),
                                     |result: crate::db::InsertResult| {
                                         json!({
                                             "content": [{
@@ -411,7 +444,7 @@ async fn handle_request(
                             }
                             "update" => {
                                 dispatch_tool!(id, tool_params.arguments, UpdateArguments,
-                                    |args: UpdateArguments| update_data(args.table_name, args.data, args.conditions, current_pool),
+                                    |args: UpdateArguments| update_data(args.table_name, args.data, args.conditions, args.database, current_pool),
                                     |result: crate::db::MutationResult| {
                                         json!({
                                             "content": [{
@@ -424,7 +457,7 @@ async fn handle_request(
                             }
                             "delete" => {
                                 dispatch_tool!(id, tool_params.arguments, DeleteArguments,
-                                    |args: DeleteArguments| delete_data(args.table_name, args.conditions, current_pool),
+                                    |args: DeleteArguments| delete_data(args.table_name, args.conditions, args.database, current_pool),
                                     |result: crate::db::MutationResult| {
                                         json!({
                                             "content": [{

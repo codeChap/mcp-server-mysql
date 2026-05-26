@@ -30,7 +30,11 @@ pub struct Config {
     #[serde(default = "default_password")]
     pub password: String,
 
-    pub database: String,
+    /// Optional default database. If omitted, the server connects without a default
+    /// database selected. Use the `database` parameter on the `query` tool (and
+    /// provide context for schema tools) to work with specific databases.
+    #[serde(default)]
+    pub database: Option<String>,
 
     #[serde(default)]
     pub allow_dangerous_queries: bool,
@@ -58,7 +62,9 @@ pub fn load() -> Result<Config, Box<dyn std::error::Error>> {
              port = 3306\n\
              username = \"admin\"\n\
              password = \"\"\n\
-             database = \"mydb\"\n\
+             # database is optional - omit it (or set to empty) to connect
+             # without a default DB. Use the 'database' param on queries.
+             database = \"wts\"\n\
              allow_dangerous_queries = false\n\
              max_rows = 1000\n\n\
              Error: {e}",

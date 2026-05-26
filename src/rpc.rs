@@ -94,6 +94,10 @@ pub struct ToolCallParams {
 #[derive(Debug, Deserialize)]
 pub struct SchemaArguments {
     pub table_name: String,
+    /// Optional database to inspect. If omitted, uses the server's default
+    /// database (or the connection's current database).
+    #[serde(default)]
+    pub database: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,6 +110,8 @@ pub struct QueryArguments {
 pub struct InsertArguments {
     pub table_name: String,
     pub data: serde_json::Value,
+    #[serde(default)]
+    pub database: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,12 +119,16 @@ pub struct UpdateArguments {
     pub table_name: String,
     pub data: serde_json::Value,
     pub conditions: serde_json::Value,
+    #[serde(default)]
+    pub database: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct DeleteArguments {
     pub table_name: String,
     pub conditions: serde_json::Value,
+    #[serde(default)]
+    pub database: Option<String>,
 }
 
 impl JsonRpcResponse {

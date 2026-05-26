@@ -1,6 +1,6 @@
 use log::{debug, error, info, warn};
 use serde_json::{json, Value};
-use sqlx::{Column, MySql, Pool, Row, TypeInfo};
+use sqlx::{Column, MySql, MySqlConnection, Pool, Row, TypeInfo};
 use std::time::Duration;
 use crate::error::DbError;
 
@@ -65,10 +65,41 @@ pub struct MutationResult {
 
 pub async fn get_schema(
     table_name: String,
+    database: Option<String>,
     pool: &Pool<MySql>,
 ) -> Result<SchemaResult, DbError> {
-    debug!("Getting schema for: {table_name}");
+    debug!("Getting schema for: {table_name} (database={:?})", database);
 
+    // If a specific database is requested, acquire a dedicated connection
+    // and switch to it so the schema queries see the right context.
+    // This mirrors the behavior of execute_query (prevents context loss from pool).
+    if let Some(ref db) = database {
+        if !is_valid_identifier(db) {
+            return Err(DbError::InvalidIdentifier(db.clone()));
+        }
+
+        let mut conn = pool.acquire().await.map_err(DbError::ConnectionError)?;
+        let use_query = format!("USE `{}`", db);
+        sqlx::query(&use_query).execute(&mut *conn).await?;
+
+        if table_name == "all-tables" {
+            let schemas = get_all_table_schemas_for_db(&mut conn, db).await?;
+            let description = format!("Retrieved schemas for {} tables in database '{}'.", schemas.len(), db);
+            info!("Successfully retrieved schemas for {} tables in {}", schemas.len(), db);
+            return Ok(SchemaResult { schemas, description });
+        } else {
+            if !is_valid_identifier(&table_name) {
+                return Err(DbError::InvalidIdentifier(table_name));
+            }
+
+            let schema = get_table_schema_for_db(&mut conn, &table_name, db).await?;
+            let description = format!("Retrieved schema for table '{}' in database '{}'.", table_name, db);
+            info!("Successfully retrieved schema for table '{}' in {}", table_name, db);
+            return Ok(SchemaResult { schemas: vec![schema], description });
+        }
+    }
+
+    // No database override — use the existing pool-based logic (respects current connection DB)
     if table_name == "all-tables" {
         let schemas = get_all_table_schemas(pool).await?;
         let description = format!("Retrieved schemas for {} tables.", schemas.len());
@@ -171,6 +202,98 @@ async fn get_all_table_schemas(pool: &Pool<MySql>) -> Result<Vec<Value>, DbError
             Ok(schema) => schemas.push(schema),
             Err(e) => {
                 warn!("Failed to get schema for table {table_name}: {e}");
+            }
+        }
+    }
+
+    Ok(schemas)
+}
+
+// Connection-aware helpers for when we have already switched the
+// database context on this specific connection (prevents pool acquire
+// from giving us a different connection with the wrong context).
+async fn get_table_schema_for_db(
+    conn: &mut MySqlConnection,
+    table_name: &str,
+    db_name: &str,
+) -> Result<Value, DbError> {
+    let table_info_query = "SELECT * FROM information_schema.tables WHERE table_name = ? AND table_schema = ?";
+    let table_info = sqlx::query(table_info_query)
+        .bind(table_name)
+        .bind(db_name)
+        .fetch_optional(&mut *conn)
+        .await?;
+
+    if table_info.is_none() {
+        return Err(DbError::NotFound(format!("Table '{}' not found in database '{}'", table_name, db_name)));
+    }
+
+    let columns_query =
+        "SELECT column_name, data_type, is_nullable, column_default, column_key, extra, column_comment
+         FROM information_schema.columns
+         WHERE table_name = ? AND table_schema = ?
+         ORDER BY ordinal_position";
+
+    let columns = sqlx::query(columns_query)
+        .bind(table_name)
+        .bind(db_name)
+        .fetch_all(&mut *conn)
+        .await?;
+
+    let indexes_query = format!("SHOW INDEX FROM `{}`.`{}`", db_name, table_name);
+    let indexes = sqlx::query(&indexes_query).fetch_all(&mut *conn).await?;
+
+    let column_info: Vec<Value> = columns
+        .into_iter()
+        .map(|row| {
+            json!({
+                "name": row.try_get::<String, _>("column_name").unwrap_or_default(),
+                "type": row.try_get::<String, _>("data_type").unwrap_or_default(),
+                "nullable": row.try_get::<String, _>("is_nullable").unwrap_or_default() == "YES",
+                "default": row.try_get::<Option<String>, _>("column_default").unwrap_or_default(),
+                "key": row.try_get::<String, _>("column_key").unwrap_or_default(),
+                "extra": row.try_get::<String, _>("extra").unwrap_or_default(),
+                "comment": row.try_get::<String, _>("column_comment").unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    let index_info: Vec<Value> = indexes
+        .into_iter()
+        .map(|row| {
+            json!({
+                "name": row.try_get::<String, _>("Key_name").unwrap_or_default(),
+                "column": row.try_get::<String, _>("Column_name").unwrap_or_default(),
+                "unique": row.try_get::<i32, _>("Non_unique").unwrap_or(1) == 0,
+                "type": row.try_get::<String, _>("Index_type").unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "table_name": table_name,
+        "columns": column_info,
+        "indexes": index_info
+    }))
+}
+
+async fn get_all_table_schemas_for_db(
+    conn: &mut MySqlConnection,
+    db_name: &str,
+) -> Result<Vec<Value>, DbError> {
+    let tables_query = "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'";
+    let tables = sqlx::query(tables_query)
+        .bind(db_name)
+        .fetch_all(&mut *conn)
+        .await?;
+
+    let mut schemas = Vec::new();
+    for table_row in tables {
+        let table_name: String = table_row.try_get("table_name")?;
+        match get_table_schema_for_db(conn, &table_name, db_name).await {
+            Ok(schema) => schemas.push(schema),
+            Err(e) => {
+                warn!("Failed to get schema for table {} in {}: {e}", table_name, db_name);
             }
         }
     }
@@ -287,9 +410,18 @@ pub async fn execute_query(
 pub async fn insert_data(
     table_name: String,
     data: Value,
+    database: Option<String>,
     pool: &Pool<MySql>,
 ) -> Result<InsertResult, DbError> {
     let mut conn = pool.acquire().await.map_err(DbError::ConnectionError)?;
+
+    if let Some(ref db) = database {
+        if !is_valid_identifier(db) {
+            return Err(DbError::InvalidIdentifier(db.clone()));
+        }
+        let use_query = format!("USE `{}`", db);
+        sqlx::query(&use_query).execute(&mut *conn).await?;
+    }
 
     if !is_valid_identifier(&table_name) {
         return Err(DbError::InvalidIdentifier(table_name));
@@ -340,9 +472,18 @@ pub async fn update_data(
     table_name: String,
     data: Value,
     conditions: Value,
+    database: Option<String>,
     pool: &Pool<MySql>,
 ) -> Result<MutationResult, DbError> {
     let mut conn = pool.acquire().await.map_err(DbError::ConnectionError)?;
+
+    if let Some(ref db) = database {
+        if !is_valid_identifier(db) {
+            return Err(DbError::InvalidIdentifier(db.clone()));
+        }
+        let use_query = format!("USE `{}`", db);
+        sqlx::query(&use_query).execute(&mut *conn).await?;
+    }
 
     if !is_valid_identifier(&table_name) {
         return Err(DbError::InvalidIdentifier(table_name));
@@ -402,9 +543,18 @@ pub async fn update_data(
 pub async fn delete_data(
     table_name: String,
     conditions: Value,
+    database: Option<String>,
     pool: &Pool<MySql>,
 ) -> Result<MutationResult, DbError> {
     let mut conn = pool.acquire().await.map_err(DbError::ConnectionError)?;
+
+    if let Some(ref db) = database {
+        if !is_valid_identifier(db) {
+            return Err(DbError::InvalidIdentifier(db.clone()));
+        }
+        let use_query = format!("USE `{}`", db);
+        sqlx::query(&use_query).execute(&mut *conn).await?;
+    }
 
     if !is_valid_identifier(&table_name) {
         return Err(DbError::InvalidIdentifier(table_name));
