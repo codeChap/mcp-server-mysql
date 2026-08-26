@@ -71,7 +71,7 @@ pub fn load() -> Result<Config, Box<dyn std::error::Error>> {
             path.display()
         )
     })?;
-    let config: Config = toml::from_str(&content)
-        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+    let config: Config =
+        toml::from_str(&content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
     Ok(config)
 }

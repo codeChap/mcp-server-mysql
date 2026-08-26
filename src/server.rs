@@ -4,24 +4,14 @@ use sqlx::{MySql, Pool};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::config::Config;
-use crate::db::{connect_with_retry, execute_query, get_schema, insert_data, update_data, delete_data};
+use crate::db::{
+    connect_with_retry, delete_data, execute_query, get_schema, insert_data, update_data,
+};
 use crate::error::DbError;
 use crate::rpc::{
-    InitializeParams,
-    InitializeResult,
-    JsonRpcResponse,
-    JsonRpcRequest,
-    ServerCapabilities,
-    ServerInfo,
-    Tool,
-    ToolsCapability,
-    ToolsList,
-    ToolCallParams,
-    SchemaArguments,
-    QueryArguments,
-    InsertArguments,
-    UpdateArguments,
-    DeleteArguments,
+    DeleteArguments, InitializeParams, InitializeResult, InsertArguments, JsonRpcRequest,
+    JsonRpcResponse, QueryArguments, SchemaArguments, ServerCapabilities, ServerInfo, Tool,
+    ToolCallParams, ToolsCapability, ToolsList, UpdateArguments,
 };
 
 /// Redact password from a database URL for safe logging.
@@ -60,7 +50,9 @@ macro_rules! dispatch_tool {
     ($id:expr, $arguments:expr, $args_type:ty, $handler:expr, $to_result:expr) => {{
         let args: $args_type = match serde_json::from_value($arguments) {
             Ok(a) => a,
-            Err(e) => return JsonRpcResponse::error($id, -32602, format!("Invalid arguments: {e}")),
+            Err(e) => {
+                return JsonRpcResponse::error($id, -32602, format!("Invalid arguments: {e}"))
+            }
         };
         match $handler(args).await {
             Ok(result) => JsonRpcResponse::success($id, $to_result(result)),
@@ -80,8 +72,10 @@ pub async fn run(args: Config) -> Result<(), Box<dyn std::error::Error>> {
     let mut lines = reader.lines();
 
     info!("MCP MySQL Server started and ready to accept connections");
-    info!("Server config: host={}, port={}, username={}, database={:?}",
-              args.host, args.port, args.username, args.database);
+    info!(
+        "Server config: host={}, port={}, username={}, database={:?}",
+        args.host, args.port, args.username, args.database
+    );
     info!("Server PID: {}", std::process::id());
     debug!("Environment variables:");
     for (key, value) in std::env::vars() {
@@ -106,14 +100,21 @@ pub async fn run(args: Config) -> Result<(), Box<dyn std::error::Error>> {
                 debug!("Received message (len={}): {}", line.len(), line);
                 match serde_json::from_str::<JsonRpcRequest>(&line) {
                     Ok(request) => {
-                        debug!("Parsed request: method={}, id={:?}", request.method, request.id);
+                        debug!(
+                            "Parsed request: method={}, id={:?}",
+                            request.method, request.id
+                        );
                         // Handle notifications (no response needed)
-                        if request.method == "notifications/initialized" || request.method == "initialized" {
+                        if request.method == "notifications/initialized"
+                            || request.method == "initialized"
+                        {
                             debug!("Received initialization notification: {}", request.method);
                             continue;
                         }
 
-                        let response = handle_request(request, &mut pool, &args, allow_dangerous_queries).await;
+                        let response =
+                            handle_request(request, &mut pool, &args, allow_dangerous_queries)
+                                .await;
                         match serde_json::to_string(&response) {
                             Ok(response_str) => {
                                 if let Err(e) = write_response(&mut stdout, &response_str).await {
@@ -122,7 +123,11 @@ pub async fn run(args: Config) -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Err(e) => {
                                 error!("Failed to serialize response: {e}");
-                                let error_response = JsonRpcResponse::error(None, -32603, "Internal error".to_string());
+                                let error_response = JsonRpcResponse::error(
+                                    None,
+                                    -32603,
+                                    "Internal error".to_string(),
+                                );
                                 if let Ok(error_str) = serde_json::to_string(&error_response) {
                                     let _ = write_response(&mut stdout, &error_str).await;
                                 }
@@ -131,7 +136,8 @@ pub async fn run(args: Config) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(e) => {
                         warn!("Failed to parse request: {e}");
-                        let error_response = JsonRpcResponse::error(None, -32700, "Parse error".to_string());
+                        let error_response =
+                            JsonRpcResponse::error(None, -32700, "Parse error".to_string());
                         if let Ok(response_str) = serde_json::to_string(&error_response) {
                             let _ = write_response(&mut stdout, &response_str).await;
                         }
@@ -157,7 +163,10 @@ pub async fn run(args: Config) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn write_response(stdout: &mut tokio::io::Stdout, response: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn write_response(
+    stdout: &mut tokio::io::Stdout,
+    response: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     stdout.write_all(response.as_bytes()).await?;
     stdout.write_all(b"\n").await?;
     stdout.flush().await?;
@@ -172,7 +181,10 @@ async fn handle_request(
 ) -> JsonRpcResponse {
     match request.method.as_str() {
         "initialize" => {
-            debug!("Handling initialize request with params: {:?}", request.params);
+            debug!(
+                "Handling initialize request with params: {:?}",
+                request.params
+            );
 
             let db_url_from_opts = request
                 .params
@@ -184,7 +196,10 @@ async fn handle_request(
 
             let database_url = match db_url_from_opts {
                 Some(url) => {
-                    info!("Using database_url from initializationOptions: {}", redact_url(&url));
+                    info!(
+                        "Using database_url from initializationOptions: {}",
+                        redact_url(&url)
+                    );
                     url
                 }
                 None => {
@@ -192,7 +207,11 @@ async fn handle_request(
                     // without selecting one. Queries can then use the `database`
                     // parameter to choose context per call. This is especially
                     // useful in dev environments with many databases.
-                    let database = args.database.as_deref().filter(|s| !s.is_empty()).unwrap_or("");
+                    let database = args
+                        .database
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("");
                     let url = if database.is_empty() {
                         format!(
                             "mysql://{}:{}@{}:{}",
@@ -209,8 +228,10 @@ async fn handle_request(
                     } else {
                         format!("/{}", database)
                     };
-                    info!("Using database_url from config: mysql://{}:***@{}:{}{}",
-                             args.username, args.host, args.port, db_suffix);
+                    info!(
+                        "Using database_url from config: mysql://{}:***@{}:{}{}",
+                        args.username, args.host, args.port, db_suffix
+                    );
                     url
                 }
             };
@@ -220,18 +241,19 @@ async fn handle_request(
                 Ok(new_pool) => {
                     info!("Database connection successful!");
                     *pool = Some(new_pool);
-                    JsonRpcResponse::success(request.id, json!(InitializeResult {
-                        protocol_version: "2025-03-26".to_string(),
-                        capabilities: ServerCapabilities {
-                            tools: Some(ToolsCapability {
-                                list_changed: true,
-                            }),
-                        },
-                        server_info: ServerInfo {
-                            name: "mcp-server-mysql".to_string(),
-                            version: env!("CARGO_PKG_VERSION").to_string(),
-                        },
-                    }))
+                    JsonRpcResponse::success(
+                        request.id,
+                        json!(InitializeResult {
+                            protocol_version: "2025-03-26".to_string(),
+                            capabilities: ServerCapabilities {
+                                tools: Some(ToolsCapability { list_changed: true }),
+                            },
+                            server_info: ServerInfo {
+                                name: "mcp-server-mysql".to_string(),
+                                version: env!("CARGO_PKG_VERSION").to_string(),
+                            },
+                        }),
+                    )
                 }
                 Err(e) => {
                     error!("Database connection failed: {e}");
@@ -371,7 +393,11 @@ async fn handle_request(
             let current_pool = match pool.as_ref() {
                 Some(p) => p,
                 None => {
-                    return JsonRpcResponse::error(request.id, -32002, "Server not initialized".to_string());
+                    return JsonRpcResponse::error(
+                        request.id,
+                        -32002,
+                        "Server not initialized".to_string(),
+                    );
                 }
             };
             debug!("Handling tool call");
@@ -480,14 +506,24 @@ async fn handle_request(
                             _ => JsonRpcResponse::error(id, -32601, format!("Unknown tool: {}", tool_params.name)),
                         }
                     }
-                    Err(e) => JsonRpcResponse::error(request.id, -32602, format!("Invalid tool call parameters: {e}")),
+                    Err(e) => JsonRpcResponse::error(
+                        request.id,
+                        -32602,
+                        format!("Invalid tool call parameters: {e}"),
+                    ),
                 },
-                None => JsonRpcResponse::error(request.id, -32602, "Missing parameters".to_string()),
+                None => {
+                    JsonRpcResponse::error(request.id, -32602, "Missing parameters".to_string())
+                }
             }
         }
         _ => {
             warn!("Unknown method: {}", request.method);
-            JsonRpcResponse::error(request.id, -32601, format!("Method not found: {}", request.method))
+            JsonRpcResponse::error(
+                request.id,
+                -32601,
+                format!("Method not found: {}", request.method),
+            )
         }
     }
 }

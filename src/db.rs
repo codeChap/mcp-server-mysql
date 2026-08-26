@@ -1,19 +1,18 @@
+use crate::error::DbError;
 use log::{debug, error, info, warn};
 use serde_json::{json, Value};
 use sqlx::{Column, MySql, MySqlConnection, Pool, Row, TypeInfo};
 use std::time::Duration;
-use crate::error::DbError;
 
 /// Validates that an identifier (table name, database name) is safe for use in backtick-quoted SQL.
 /// Rejects empty strings, strings longer than 64 chars, and strings containing backticks or null bytes.
 pub fn is_valid_identifier(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 64
-        && !name.contains('`')
-        && !name.contains('\0')
+    !name.is_empty() && name.len() <= 64 && !name.contains('`') && !name.contains('\0')
 }
 
-pub async fn connect_with_retry(database_url: &str) -> Result<Pool<MySql>, Box<dyn std::error::Error>> {
+pub async fn connect_with_retry(
+    database_url: &str,
+) -> Result<Pool<MySql>, Box<dyn std::error::Error>> {
     let mut retry_count = 0;
     const MAX_RETRIES: u32 = 5;
     const RETRY_DELAY_MS: u64 = 1000;
@@ -84,18 +83,38 @@ pub async fn get_schema(
 
         if table_name == "all-tables" {
             let schemas = get_all_table_schemas_for_db(&mut conn, db).await?;
-            let description = format!("Retrieved schemas for {} tables in database '{}'.", schemas.len(), db);
-            info!("Successfully retrieved schemas for {} tables in {}", schemas.len(), db);
-            return Ok(SchemaResult { schemas, description });
+            let description = format!(
+                "Retrieved schemas for {} tables in database '{}'.",
+                schemas.len(),
+                db
+            );
+            info!(
+                "Successfully retrieved schemas for {} tables in {}",
+                schemas.len(),
+                db
+            );
+            return Ok(SchemaResult {
+                schemas,
+                description,
+            });
         } else {
             if !is_valid_identifier(&table_name) {
                 return Err(DbError::InvalidIdentifier(table_name));
             }
 
             let schema = get_table_schema_for_db(&mut conn, &table_name, db).await?;
-            let description = format!("Retrieved schema for table '{}' in database '{}'.", table_name, db);
-            info!("Successfully retrieved schema for table '{}' in {}", table_name, db);
-            return Ok(SchemaResult { schemas: vec![schema], description });
+            let description = format!(
+                "Retrieved schema for table '{}' in database '{}'.",
+                table_name, db
+            );
+            info!(
+                "Successfully retrieved schema for table '{}' in {}",
+                table_name, db
+            );
+            return Ok(SchemaResult {
+                schemas: vec![schema],
+                description,
+            });
         }
     }
 
@@ -103,8 +122,14 @@ pub async fn get_schema(
     if table_name == "all-tables" {
         let schemas = get_all_table_schemas(pool).await?;
         let description = format!("Retrieved schemas for {} tables.", schemas.len());
-        info!("Successfully retrieved schemas for {} tables", schemas.len());
-        Ok(SchemaResult { schemas, description })
+        info!(
+            "Successfully retrieved schemas for {} tables",
+            schemas.len()
+        );
+        Ok(SchemaResult {
+            schemas,
+            description,
+        })
     } else {
         if !is_valid_identifier(&table_name) {
             return Err(DbError::InvalidIdentifier(table_name));
@@ -113,7 +138,10 @@ pub async fn get_schema(
         let schema = get_table_schema(pool, &table_name).await?;
         let description = format!("Retrieved schema for table '{}'.", table_name);
         info!("Successfully retrieved schema for table '{table_name}'");
-        Ok(SchemaResult { schemas: vec![schema], description })
+        Ok(SchemaResult {
+            schemas: vec![schema],
+            description,
+        })
     }
 }
 
@@ -123,7 +151,8 @@ async fn get_table_schema(pool: &Pool<MySql>, table_name: &str) -> Result<Value,
         .await?;
     let current_db = current_db.ok_or(DbError::NoDatabaseSelected)?;
 
-    let table_info_query = "SELECT * FROM information_schema.tables WHERE table_name = ? AND table_schema = ?";
+    let table_info_query =
+        "SELECT * FROM information_schema.tables WHERE table_name = ? AND table_schema = ?";
     let table_info = sqlx::query(table_info_query)
         .bind(table_name)
         .bind(&current_db)
@@ -131,7 +160,10 @@ async fn get_table_schema(pool: &Pool<MySql>, table_name: &str) -> Result<Value,
         .await?;
 
     if table_info.is_none() {
-        return Err(DbError::NotFound(format!("Table '{}' not found", table_name)));
+        return Err(DbError::NotFound(format!(
+            "Table '{}' not found",
+            table_name
+        )));
     }
 
     let columns_query =
@@ -217,7 +249,8 @@ async fn get_table_schema_for_db(
     table_name: &str,
     db_name: &str,
 ) -> Result<Value, DbError> {
-    let table_info_query = "SELECT * FROM information_schema.tables WHERE table_name = ? AND table_schema = ?";
+    let table_info_query =
+        "SELECT * FROM information_schema.tables WHERE table_name = ? AND table_schema = ?";
     let table_info = sqlx::query(table_info_query)
         .bind(table_name)
         .bind(db_name)
@@ -225,7 +258,10 @@ async fn get_table_schema_for_db(
         .await?;
 
     if table_info.is_none() {
-        return Err(DbError::NotFound(format!("Table '{}' not found in database '{}'", table_name, db_name)));
+        return Err(DbError::NotFound(format!(
+            "Table '{}' not found in database '{}'",
+            table_name, db_name
+        )));
     }
 
     let columns_query =
@@ -293,7 +329,10 @@ async fn get_all_table_schemas_for_db(
         match get_table_schema_for_db(conn, &table_name, db_name).await {
             Ok(schema) => schemas.push(schema),
             Err(e) => {
-                warn!("Failed to get schema for table {} in {}: {e}", table_name, db_name);
+                warn!(
+                    "Failed to get schema for table {} in {}: {e}",
+                    table_name, db_name
+                );
             }
         }
     }
@@ -354,7 +393,11 @@ pub async fn execute_query(
 
     let total_count = rows.len();
     let truncated = total_count > max_rows;
-    let rows_to_process = if truncated { &rows[..max_rows] } else { &rows[..] };
+    let rows_to_process = if truncated {
+        &rows[..max_rows]
+    } else {
+        &rows[..]
+    };
 
     let mut results = Vec::with_capacity(rows_to_process.len());
 
@@ -446,7 +489,11 @@ pub async fn insert_data(
     let query = format!(
         "INSERT INTO `{}` ({}) VALUES ({})",
         table_name,
-        columns.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(", "),
+        columns
+            .iter()
+            .map(|c| format!("`{}`", c))
+            .collect::<Vec<_>>()
+            .join(", "),
         placeholders.join(", ")
     );
 
@@ -465,7 +512,9 @@ pub async fn insert_data(
         .await
         .unwrap_or(0);
 
-    Ok(InsertResult { last_insert_id: last_id })
+    Ok(InsertResult {
+        last_insert_id: last_id,
+    })
 }
 
 pub async fn update_data(
@@ -502,7 +551,9 @@ pub async fn update_data(
     }
 
     if conditions_map.is_empty() {
-        return Err(DbError::InvalidInput("Conditions object is empty".to_string()));
+        return Err(DbError::InvalidInput(
+            "Conditions object is empty".to_string(),
+        ));
     }
 
     for k in data_map.keys().chain(conditions_map.keys()) {
@@ -512,7 +563,10 @@ pub async fn update_data(
     }
 
     let set_clause: Vec<String> = data_map.keys().map(|k| format!("`{}` = ?", k)).collect();
-    let where_clause: Vec<String> = conditions_map.keys().map(|k| format!("`{}` = ?", k)).collect();
+    let where_clause: Vec<String> = conditions_map
+        .keys()
+        .map(|k| format!("`{}` = ?", k))
+        .collect();
     let query = format!(
         "UPDATE `{}` SET {} WHERE {}",
         table_name,
@@ -565,7 +619,9 @@ pub async fn delete_data(
         .ok_or_else(|| DbError::InvalidInput("Conditions must be an object".to_string()))?;
 
     if conditions_map.is_empty() {
-        return Err(DbError::InvalidInput("Conditions object is empty".to_string()));
+        return Err(DbError::InvalidInput(
+            "Conditions object is empty".to_string(),
+        ));
     }
 
     for k in conditions_map.keys() {
@@ -574,7 +630,10 @@ pub async fn delete_data(
         }
     }
 
-    let where_clause: Vec<String> = conditions_map.keys().map(|k| format!("`{}` = ?", k)).collect();
+    let where_clause: Vec<String> = conditions_map
+        .keys()
+        .map(|k| format!("`{}` = ?", k))
+        .collect();
     let query = format!(
         "DELETE FROM `{}` WHERE {}",
         table_name,
