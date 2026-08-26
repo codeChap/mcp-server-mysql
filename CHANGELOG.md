@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Schema tool content**: The `mysql` describe/schema tool now puts pretty-printed table schema JSON into `content[0].text` (after the short description). MCP hosts that only surface `content` to the model can now see columns and indexes. The structured `schema`/`schemas` sibling fields are kept for existing clients.
+
 ## [0.2.0] - 2024-01-XX
 
 ### Added

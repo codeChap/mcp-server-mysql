@@ -385,11 +385,20 @@ async fn handle_request(
                                 dispatch_tool!(id, tool_params.arguments, SchemaArguments,
                                     |args: SchemaArguments| get_schema(args.table_name, args.database, current_pool),
                                     |result: crate::db::SchemaResult| {
+                                        // Hosts typically surface only content[].text to the model.
+                                        // Put pretty-printed schema JSON there (same pattern as query).
+                                        let schema_json = if result.schemas.len() == 1 {
+                                            serde_json::to_string_pretty(&result.schemas[0])
+                                        } else {
+                                            serde_json::to_string_pretty(&result.schemas)
+                                        }
+                                        .unwrap_or_else(|_| "Error formatting schema".to_string());
+                                        let content_text = format!("{}\n\n{}", result.description, schema_json);
                                         if result.schemas.len() == 1 {
                                             json!({
                                                 "content": [{
                                                     "type": "text",
-                                                    "text": result.description
+                                                    "text": content_text
                                                 }],
                                                 "schema": result.schemas[0]
                                             })
@@ -397,7 +406,7 @@ async fn handle_request(
                                             json!({
                                                 "content": [{
                                                     "type": "text",
-                                                    "text": result.description
+                                                    "text": content_text
                                                 }],
                                                 "schemas": result.schemas
                                             })
